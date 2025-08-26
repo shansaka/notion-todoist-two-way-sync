@@ -1,12 +1,11 @@
 import requests
 from datetime import datetime, timezone, timedelta
+import time
 import os
-
 
 # -----------------------------
 # Credentials & Endpoints
 # -----------------------------
-
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 TODOIST_API_KEY = os.getenv("TODOIST_API_KEY")
@@ -31,14 +30,13 @@ def safe_post(url, headers, data):
         response.raise_for_status()
         return response.json()
     except requests.HTTPError as e:
-        print(f"\n❌ POST request to {url} failed!")
-        print(f"Status code: {e.response.status_code}")
-        print(f"Response text: {e.response.text}")
-        print(f"Payload sent: {data}")
+        print(f"\n❌ POST request to {url} failed! Status code: {e.response.status_code}", flush=True)
+        print(f"Response text: {e.response.text}", flush=True)
+        print(f"Payload sent: {data}", flush=True)
         raise
     except Exception as e:
-        print(f"\n❌ POST request to {url} raised exception: {e}")
-        print(f"Payload sent: {data}")
+        print(f"\n❌ POST request to {url} raised exception: {e}", flush=True)
+        print(f"Payload sent: {data}", flush=True)
         raise
 
 def safe_patch(url, headers, data):
@@ -47,14 +45,13 @@ def safe_patch(url, headers, data):
         response.raise_for_status()
         return response.json()
     except requests.HTTPError as e:
-        print(f"\n❌ PATCH request to {url} failed!")
-        print(f"Status code: {e.response.status_code}")
-        print(f"Response text: {e.response.text}")
-        print(f"Payload sent: {data}")
+        print(f"\n❌ PATCH request to {url} failed! Status code: {e.response.status_code}", flush=True)
+        print(f"Response text: {e.response.text}", flush=True)
+        print(f"Payload sent: {data}", flush=True)
         raise
     except Exception as e:
-        print(f"\n❌ PATCH request to {url} raised exception: {e}")
-        print(f"Payload sent: {data}")
+        print(f"\n❌ PATCH request to {url} raised exception: {e}", flush=True)
+        print(f"Payload sent: {data}", flush=True)
         raise
 
 def safe_post_todoist(url, headers, data=None):
@@ -63,14 +60,13 @@ def safe_post_todoist(url, headers, data=None):
         response.raise_for_status()
         return response.json() if response.content else {}
     except requests.HTTPError as e:
-        print(f"\n❌ Todoist POST request to {url} failed!")
-        print(f"Status code: {e.response.status_code}")
-        print(f"Response text: {e.response.text}")
-        print(f"Payload sent: {data}")
+        print(f"\n❌ Todoist POST request to {url} failed! Status code: {e.response.status_code}", flush=True)
+        print(f"Response text: {e.response.text}", flush=True)
+        print(f"Payload sent: {data}", flush=True)
         raise
     except Exception as e:
-        print(f"\n❌ Todoist POST request to {url} raised exception: {e}")
-        print(f"Payload sent: {data}")
+        print(f"\n❌ Todoist POST request to {url} raised exception: {e}", flush=True)
+        print(f"Payload sent: {data}", flush=True)
         raise
 
 # -----------------------------
@@ -151,9 +147,7 @@ def build_notion_properties(task, project_map, existing_props=None):
         "Last Sync Time": {"date": {"start": datetime.now(timezone.utc).isoformat()}}
     }
 
-    # Remove all None properties before sending to Notion
-    props = {k: v for k, v in props.items() if v is not None}
-    return props
+    return {k: v for k, v in props.items() if v is not None}
 
 # -----------------------------
 # Compare Notion Properties
@@ -272,7 +266,7 @@ def create_notion_task(task, project_map):
 def update_notion_task(page_id, task, project_map, existing_props=None):
     new_props = build_notion_properties(task, project_map, existing_props)
     if not has_changes(existing_props, new_props):
-        return False  # nothing changed
+        return False
     data = {"properties": new_props}
     safe_patch(f"https://api.notion.com/v1/pages/{page_id}", NOTION_HEADERS, data)
     return True
@@ -306,7 +300,7 @@ def sync_tasks():
             if updated:
                 update_count += 1
 
-    print(f"✅ Todoist → Notion sync complete. {new_count} new tasks, {update_count} updated.")
+    print(f"✅ Todoist → Notion sync complete. {new_count} new tasks, {update_count} updated.", flush=True)
 
 # -----------------------------
 # Two-Way Sync Entry
@@ -316,10 +310,18 @@ def sync_two_way():
     for nt in notion_tasks_to_sync:
         update_todoist_task(nt)
         update_notion_last_sync(nt["page_id"])
-    print(f"✅ Notion → Todoist sync complete. {len(notion_tasks_to_sync)} tasks updated.")
+    print(f"✅ Notion → Todoist sync complete. {len(notion_tasks_to_sync)} tasks updated.", flush=True)
 
     sync_tasks()
 
+# -----------------------------
+# Continuous Loop (every 1.5 minutes)
+# -----------------------------
 if __name__ == "__main__":
-    sync_two_way()
-
+    print("🟢 Starting Todoist ↔ Notion sync loop (every 1.5 minutes)", flush=True)
+    while True:
+        try:
+            sync_two_way()
+        except Exception as e:
+            print(f"⚠️ Error during sync: {e}", flush=True)
+        time.sleep(90)  # 1.5 minutes
