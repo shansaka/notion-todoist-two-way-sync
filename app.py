@@ -143,8 +143,7 @@ def build_notion_properties(task, project_map, existing_props=None, include_sync
         "Priority": {"select": {"name": f"P{task['priority']}"}} if task.get("priority") else None,
         "Due Date": due_date_obj,
         "Project": {"select": {"name": project_name}},
-        "Description": {"rich_text": [{"text": {"content": task.get("description", "")}}]},
-        "Labels": {"multi_select": labels}  # labels
+        "Labels": {"multi_select": labels}  # labels syncing
     }
 
     if include_sync_time:
@@ -165,11 +164,8 @@ def normalize_datetime(dt_str):
         return dt_str
 
 def has_changes(existing_props, new_props):
-    def get_text(prop, key):
-        return (prop.get(key, {}).get("title") or [{}])[0].get("text", {}).get("content", "")
-
-    existing_name = get_text(existing_props, "Name")
-    new_name = get_text(new_props, "Name")
+    existing_name = (existing_props.get("Name", {}).get("title") or [{}])[0].get("text", {}).get("content", "")
+    new_name = (new_props.get("Name", {}).get("title") or [{}])[0].get("text", {}).get("content", "")
     if existing_name != new_name:
         print(f"🔄 Change detected: Name '{existing_name}' → '{new_name}'", flush=True)
         return True
@@ -201,12 +197,6 @@ def has_changes(existing_props, new_props):
         print(f"🔄 Change detected: Project '{existing_proj}' → '{new_proj}'", flush=True)
         return True
 
-    existing_desc = (existing_props.get("Description", {}).get("rich_text") or [{}])[0].get("text", {}).get("content", "")
-    new_desc = (new_props.get("Description", {}).get("rich_text") or [{}])[0].get("text", {}).get("content", "")
-    if existing_desc != new_desc:
-        print(f"🔄 Change detected: Description changed", flush=True)
-        return True
-
     existing_labels = set([l["name"] for l in (existing_props.get("Labels", {}).get("multi_select") or [])])
     new_labels = set([l["name"] for l in (new_props.get("Labels", {}).get("multi_select") or [])])
     if existing_labels != new_labels:
@@ -219,7 +209,7 @@ def has_changes(existing_props, new_props):
 # Notion → Todoist Sync
 # -----------------------------
 def get_notion_tasks_to_sync():
-    query_url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+    query_url = f"{NOTION_URL}/databases/{NOTION_DATABASE_ID}/query"
     response = requests.post(query_url, headers=NOTION_HEADERS, json={
         "filter": {"property": "Need Sync", "checkbox": {"equals": True}}
     })
@@ -291,7 +281,7 @@ def update_notion_last_sync(page_id):
             "Last Sync Time": {"date": {"start": datetime.now(timezone.utc).isoformat()}}
         }
     }
-    safe_patch(f"https://api.notion.com/v1/pages/{page_id}", NOTION_HEADERS, data)
+    safe_patch(f"{NOTION_URL}/{page_id}", NOTION_HEADERS, data)
 
 # -----------------------------
 # Todoist → Notion Sync
@@ -351,7 +341,7 @@ def sync_two_way():
     sync_tasks()
 
 # -----------------------------
-# Run every 1 minute
+# Run every 2 minutes
 # -----------------------------
 if __name__ == "__main__":
     while True:
