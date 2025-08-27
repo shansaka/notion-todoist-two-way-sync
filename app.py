@@ -361,4 +361,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Error in sync loop: {e}", flush=True)
         print("", flush=True)
-        time.sleep(60)
+        time.sleep(120)
