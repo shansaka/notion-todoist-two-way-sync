@@ -1,7 +1,6 @@
 import requests
 from datetime import datetime, timezone, timedelta
 import time
-import os
 
 # -----------------------------
 # Credentials & Endpoints
@@ -30,12 +29,9 @@ def safe_post(url, headers, data):
         response.raise_for_status()
         return response.json()
     except requests.HTTPError as e:
-        print(f"\n❌ POST request to {url} failed! Status code: {e.response.status_code}", flush=True)
+        print(f"\n❌ POST request to {url} failed!", flush=True)
+        print(f"Status code: {e.response.status_code}", flush=True)
         print(f"Response text: {e.response.text}", flush=True)
-        print(f"Payload sent: {data}", flush=True)
-        raise
-    except Exception as e:
-        print(f"\n❌ POST request to {url} raised exception: {e}", flush=True)
         print(f"Payload sent: {data}", flush=True)
         raise
 
@@ -45,12 +41,9 @@ def safe_patch(url, headers, data):
         response.raise_for_status()
         return response.json()
     except requests.HTTPError as e:
-        print(f"\n❌ PATCH request to {url} failed! Status code: {e.response.status_code}", flush=True)
+        print(f"\n❌ PATCH request to {url} failed!", flush=True)
+        print(f"Status code: {e.response.status_code}", flush=True)
         print(f"Response text: {e.response.text}", flush=True)
-        print(f"Payload sent: {data}", flush=True)
-        raise
-    except Exception as e:
-        print(f"\n❌ PATCH request to {url} raised exception: {e}", flush=True)
         print(f"Payload sent: {data}", flush=True)
         raise
 
@@ -60,12 +53,9 @@ def safe_post_todoist(url, headers, data=None):
         response.raise_for_status()
         return response.json() if response.content else {}
     except requests.HTTPError as e:
-        print(f"\n❌ Todoist POST request to {url} failed! Status code: {e.response.status_code}", flush=True)
+        print(f"\n❌ Todoist POST request to {url} failed!", flush=True)
+        print(f"Status code: {e.response.status_code}", flush=True)
         print(f"Response text: {e.response.text}", flush=True)
-        print(f"Payload sent: {data}", flush=True)
-        raise
-    except Exception as e:
-        print(f"\n❌ Todoist POST request to {url} raised exception: {e}", flush=True)
         print(f"Payload sent: {data}", flush=True)
         raise
 
@@ -104,7 +94,7 @@ def query_notion_tasks():
 # -----------------------------
 # Build Notion Properties
 # -----------------------------
-def build_notion_properties(task, project_map, existing_props=None, include_sync_time=False):
+def build_notion_properties(task, project_map, existing_props=None, include_sync_time=True):
     project_name = project_map.get(str(task["project_id"]), "Unknown Project")
     new_start = None
     if task.get("due"):
@@ -143,7 +133,7 @@ def build_notion_properties(task, project_map, existing_props=None, include_sync
         "Todoist ID": {"rich_text": [{"text": {"content": str(task["id"])}}]},
         "Priority": {"select": {"name": f"P{task['priority']}"}} if task.get("priority") else None,
         "Due Date": due_date_obj,
-        "Project": {"select": {"name": project_name}},
+        "Project": {"select": {"name": project_name}}
     }
 
     if include_sync_time:
@@ -159,36 +149,42 @@ def normalize_datetime(dt_str):
         return None
     try:
         dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-        return dt.replace(microsecond=0).isoformat()
-    except:
+        return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    except Exception:
         return dt_str
 
 def has_changes(existing_props, new_props):
     existing_name = (existing_props.get("Name", {}).get("title") or [{}])[0].get("text", {}).get("content", "")
     new_name = (new_props.get("Name", {}).get("title") or [{}])[0].get("text", {}).get("content", "")
     if existing_name != new_name:
+        print(f"🔄 Change detected: Name '{existing_name}' → '{new_name}'", flush=True)
         return True
 
     existing_done = existing_props.get("Done", {}).get("checkbox", False)
     new_done = new_props.get("Done", {}).get("checkbox", False)
     if existing_done != new_done:
+        print(f"🔄 Change detected: Done {existing_done} → {new_done}", flush=True)
         return True
 
     existing_pri = existing_props.get("Priority", {}).get("select", {}).get("name")
     new_pri = new_props.get("Priority", {}).get("select", {}).get("name")
     if (existing_pri or "") != (new_pri or ""):
+        print(f"🔄 Change detected: Priority '{existing_pri}' → '{new_pri}'", flush=True)
         return True
 
     existing_due = existing_props.get("Due Date", {}).get("date") or {}
     new_due = new_props.get("Due Date", {}).get("date") or {}
     if normalize_datetime(existing_due.get("start")) != normalize_datetime(new_due.get("start")):
+        print(f"🔄 Change detected: Due start '{existing_due.get('start')}' → '{new_due.get('start')}'", flush=True)
         return True
     if normalize_datetime(existing_due.get("end")) != normalize_datetime(new_due.get("end")):
+        print(f"🔄 Change detected: Due end '{existing_due.get('end')}' → '{new_due.get('end')}'", flush=True)
         return True
 
     existing_proj = existing_props.get("Project", {}).get("select", {}).get("name")
     new_proj = new_props.get("Project", {}).get("select", {}).get("name")
     if (existing_proj or "") != (new_proj or ""):
+        print(f"🔄 Change detected: Project '{existing_proj}' → '{new_proj}'", flush=True)
         return True
 
     return False
@@ -261,7 +257,7 @@ def update_notion_last_sync(page_id):
 def create_notion_task(task, project_map):
     data = {
         "parent": {"database_id": NOTION_DATABASE_ID},
-        "properties": build_notion_properties(task, project_map, include_sync_time=True)
+        "properties": build_notion_properties(task, project_map)
     }
     safe_post(NOTION_URL, NOTION_HEADERS, data)
 
@@ -269,7 +265,7 @@ def update_notion_task(page_id, task, project_map, existing_props=None):
     new_props = build_notion_properties(task, project_map, existing_props, include_sync_time=False)
     if not has_changes(existing_props, new_props):
         return False
-    # Only add Last Sync Time if real changes
+
     new_props["Last Sync Time"] = {"date": {"start": datetime.now(timezone.utc).isoformat()}}
     data = {"properties": new_props}
     safe_patch(f"https://api.notion.com/v1/pages/{page_id}", NOTION_HEADERS, data)
@@ -313,13 +309,14 @@ def sync_two_way():
     sync_tasks()
 
 # -----------------------------
-# Continuous Loop (every 1.5 minutes)
+# Run every 1 minute
 # -----------------------------
 if __name__ == "__main__":
-    print("🟢 Starting Todoist ↔ Notion sync loop (every 1.5 minutes)", flush=True)
     while True:
+        print(f"\n⏰ Running sync at {datetime.now().isoformat()}", flush=True)
         try:
             sync_two_way()
         except Exception as e:
-            print(f"⚠️ Error during sync: {e}", flush=True)
-        time.sleep(90)  # 1.5 minutes
+            print(f"❌ Error in sync loop: {e}", flush=True)
+        print("", flush=True)  # empty line for separation
+        time.sleep(60)
