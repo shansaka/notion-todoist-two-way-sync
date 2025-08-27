@@ -104,7 +104,7 @@ def query_notion_tasks():
 # -----------------------------
 # Build Notion Properties
 # -----------------------------
-def build_notion_properties(task, project_map, existing_props=None):
+def build_notion_properties(task, project_map, existing_props=None, include_sync_time=False):
     project_name = project_map.get(str(task["project_id"]), "Unknown Project")
     new_start = None
     if task.get("due"):
@@ -144,8 +144,10 @@ def build_notion_properties(task, project_map, existing_props=None):
         "Priority": {"select": {"name": f"P{task['priority']}"}} if task.get("priority") else None,
         "Due Date": due_date_obj,
         "Project": {"select": {"name": project_name}},
-        "Last Sync Time": {"date": {"start": datetime.now(timezone.utc).isoformat()}}
     }
+
+    if include_sync_time:
+        props["Last Sync Time"] = {"date": {"start": datetime.now(timezone.utc).isoformat()}}
 
     return {k: v for k, v in props.items() if v is not None}
 
@@ -259,14 +261,16 @@ def update_notion_last_sync(page_id):
 def create_notion_task(task, project_map):
     data = {
         "parent": {"database_id": NOTION_DATABASE_ID},
-        "properties": build_notion_properties(task, project_map)
+        "properties": build_notion_properties(task, project_map, include_sync_time=True)
     }
     safe_post(NOTION_URL, NOTION_HEADERS, data)
 
 def update_notion_task(page_id, task, project_map, existing_props=None):
-    new_props = build_notion_properties(task, project_map, existing_props)
+    new_props = build_notion_properties(task, project_map, existing_props, include_sync_time=False)
     if not has_changes(existing_props, new_props):
         return False
+    # Only add Last Sync Time if real changes
+    new_props["Last Sync Time"] = {"date": {"start": datetime.now(timezone.utc).isoformat()}}
     data = {"properties": new_props}
     safe_patch(f"https://api.notion.com/v1/pages/{page_id}", NOTION_HEADERS, data)
     return True
@@ -277,7 +281,6 @@ def sync_tasks():
     notion_tasks = query_notion_tasks()
 
     new_count, update_count = 0, 0
-    now = datetime.now(timezone.utc)
 
     for task in todoist_tasks:
         tid = str(task["id"])
@@ -286,11 +289,6 @@ def sync_tasks():
             new_count += 1
         else:
             existing_props = notion_tasks[tid]["properties"]
-            last_sync_str = existing_props.get("Last Sync Time", {}).get("date", {}).get("start")
-            if last_sync_str:
-                last_sync = datetime.fromisoformat(last_sync_str.replace("Z", "+00:00"))
-                if now - last_sync < timedelta(seconds=10):
-                    continue
             updated = update_notion_task(
                 notion_tasks[tid]["page_id"],
                 task,
