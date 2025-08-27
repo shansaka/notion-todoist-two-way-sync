@@ -3,6 +3,35 @@ from datetime import datetime, timezone
 import time
 import os
 
+import smtplib
+from email.message import EmailMessage
+
+# -----------------------------
+# Email Notification Function
+# -----------------------------
+EMAIL_HOST = os.getenv("EMAIL_HOST")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
+EMAIL_TO = os.getenv("EMAIL_TO", EMAIL_USER)
+
+def send_error_email(subject, body):
+    try:
+        msg = EmailMessage()
+        msg["From"] = EMAIL_USER
+        msg["To"] = EMAIL_TO
+        msg["Subject"] = subject
+        msg.set_content(body)
+
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.send_message(msg)
+
+        print(f"📧 Error email sent to {EMAIL_TO}", flush=True)
+    except Exception as e:
+        print(f"❌ Failed to send error email: {e}", flush=True)
+
 # -----------------------------
 # Credentials & Endpoints
 # -----------------------------
@@ -143,13 +172,14 @@ def build_notion_properties(task, project_map, existing_props=None, include_sync
         "Priority": {"select": {"name": f"P{task['priority']}"}} if task.get("priority") else None,
         "Due Date": due_date_obj,
         "Project": {"select": {"name": project_name}},
-        "Labels": {"multi_select": labels}  # labels syncing
+        "Labels": {"multi_select": labels}  # labels
     }
 
     if include_sync_time:
         props["Last Sync Time"] = {"date": {"start": datetime.now(timezone.utc).isoformat()}}
 
     return {k: v for k, v in props.items() if v is not None}
+
 
 # -----------------------------
 # Compare Notion Properties
@@ -164,8 +194,11 @@ def normalize_datetime(dt_str):
         return dt_str
 
 def has_changes(existing_props, new_props):
-    existing_name = (existing_props.get("Name", {}).get("title") or [{}])[0].get("text", {}).get("content", "")
-    new_name = (new_props.get("Name", {}).get("title") or [{}])[0].get("text", {}).get("content", "")
+    def get_text(prop, key):
+        return (prop.get(key, {}).get("title") or [{}])[0].get("text", {}).get("content", "")
+
+    existing_name = get_text(existing_props, "Name")
+    new_name = get_text(new_props, "Name")
     if existing_name != new_name:
         print(f"🔄 Change detected: Name '{existing_name}' → '{new_name}'", flush=True)
         return True
@@ -205,11 +238,12 @@ def has_changes(existing_props, new_props):
 
     return False
 
+
 # -----------------------------
 # Notion → Todoist Sync
 # -----------------------------
 def get_notion_tasks_to_sync():
-    query_url = f"{NOTION_URL}/databases/{NOTION_DATABASE_ID}/query"
+    query_url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
     response = requests.post(query_url, headers=NOTION_HEADERS, json={
         "filter": {"property": "Need Sync", "checkbox": {"equals": True}}
     })
@@ -281,7 +315,7 @@ def update_notion_last_sync(page_id):
             "Last Sync Time": {"date": {"start": datetime.now(timezone.utc).isoformat()}}
         }
     }
-    safe_patch(f"{NOTION_URL}/{page_id}", NOTION_HEADERS, data)
+    safe_patch(f"https://api.notion.com/v1/pages/{page_id}", NOTION_HEADERS, data)
 
 # -----------------------------
 # Todoist → Notion Sync
@@ -341,7 +375,7 @@ def sync_two_way():
     sync_tasks()
 
 # -----------------------------
-# Run every 2 minutes
+# Run every 1 minute
 # -----------------------------
 if __name__ == "__main__":
     while True:
@@ -350,5 +384,9 @@ if __name__ == "__main__":
             sync_two_way()
         except Exception as e:
             print(f"❌ Error in sync loop: {e}", flush=True)
+            send_error_email(
+                subject="🚨 Notion-Todoist Sync Error",
+                body=f"An error occurred during sync:\n\n{e}"
+            )
         print("", flush=True)
         time.sleep(120)
