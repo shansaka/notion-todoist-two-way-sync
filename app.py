@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import time
 import os
 
@@ -19,6 +19,7 @@ NOTION_HEADERS = {
 
 TODOIST_TASKS_URL = "https://api.todoist.com/rest/v2/tasks"
 TODOIST_PROJECTS_URL = "https://api.todoist.com/rest/v2/projects"
+TODOIST_LABELS_URL = "https://api.todoist.com/rest/v2/labels"
 TODOIST_HEADERS = {"Authorization": f"Bearer {TODOIST_API_KEY}"}
 
 # -----------------------------
@@ -72,6 +73,11 @@ def get_todoist_projects():
     response = requests.get(TODOIST_PROJECTS_URL, headers=TODOIST_HEADERS)
     response.raise_for_status()
     return {str(p["id"]): p["name"] for p in response.json()}
+
+def get_todoist_labels():
+    response = requests.get(TODOIST_LABELS_URL, headers=TODOIST_HEADERS)
+    response.raise_for_status()
+    return {l["name"]: l["id"] for l in response.json()}
 
 def query_notion_tasks():
     query_url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
@@ -128,6 +134,8 @@ def build_notion_properties(task, project_map, existing_props=None, include_sync
     if end_iso and due_date_obj:
         due_date_obj["date"]["end"] = end_iso
 
+    labels = [{"name": label} for label in task.get("labels", [])]
+
     props = {
         "Name": {"title": [{"text": {"content": task["content"]}}]},
         "Done": {"checkbox": task.get("is_completed", False)},
@@ -135,7 +143,8 @@ def build_notion_properties(task, project_map, existing_props=None, include_sync
         "Priority": {"select": {"name": f"P{task['priority']}"}} if task.get("priority") else None,
         "Due Date": due_date_obj,
         "Project": {"select": {"name": project_name}},
-        "Description": {"rich_text": [{"text": {"content": task.get("description", "")}}]}  # added
+        "Description": {"rich_text": [{"text": {"content": task.get("description", "")}}]},
+        "Labels": {"multi_select": labels}  # labels
     }
 
     if include_sync_time:
@@ -198,6 +207,12 @@ def has_changes(existing_props, new_props):
         print(f"🔄 Change detected: Description changed", flush=True)
         return True
 
+    existing_labels = set([l["name"] for l in (existing_props.get("Labels", {}).get("multi_select") or [])])
+    new_labels = set([l["name"] for l in (new_props.get("Labels", {}).get("multi_select") or [])])
+    if existing_labels != new_labels:
+        print(f"🔄 Change detected: Labels {existing_labels} → {new_labels}", flush=True)
+        return True
+
     return False
 
 # -----------------------------
@@ -245,6 +260,11 @@ def update_todoist_task(notion_task):
                 data["due_datetime"] = due + "Z"
         else:
             data["due_date"] = due
+    if "Labels" in props:
+        label_names = [l["name"] for l in props["Labels"]["multi_select"]]
+        label_map = get_todoist_labels()
+        label_ids = [label_map[name] for name in label_names if name in label_map]
+        data["label_ids"] = label_ids
 
     if not tid:
         response = safe_post_todoist(TODOIST_TASKS_URL, TODOIST_HEADERS, data)
@@ -290,7 +310,7 @@ def update_notion_task(page_id, task, project_map, existing_props=None):
 
     new_props["Last Sync Time"] = {"date": {"start": datetime.now(timezone.utc).isoformat()}}
     data = {"properties": new_props}
-    safe_patch(f"https://api.notion.com/v1/pages/{page_id}", NOTION_HEADERS, data)
+    safe_patch(f"{NOTION_URL}/{page_id}", NOTION_HEADERS, data)
     return True
 
 def sync_tasks():
@@ -335,7 +355,7 @@ def sync_two_way():
 # -----------------------------
 if __name__ == "__main__":
     while True:
-        print(f"\n⏰ Running sync at {datetime.now().isoformat()}", flush=True)
+        print(f"\n⏰ Running sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
         try:
             sync_two_way()
         except Exception as e:
