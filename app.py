@@ -217,10 +217,9 @@ def get_notion_tasks_to_sync():
 
 def update_todoist_task(notion_task):
     tid = notion_task["todoist_id"]
-    if not tid:
-        return
     props = notion_task["properties"]
     data = {}
+
     if "Name" in props and props["Name"]["title"]:
         data["content"] = props["Name"]["title"][0]["text"]["content"]
     if "Priority" in props and props["Priority"]["select"]:
@@ -236,13 +235,29 @@ def update_todoist_task(notion_task):
                 data["due_datetime"] = due + "Z"
         else:
             data["due_date"] = due
-    if data:
-        safe_post_todoist(f"{TODOIST_TASKS_URL}/{tid}", TODOIST_HEADERS, data)
-    if "Done" in props:
-        if props["Done"]["checkbox"]:
-            safe_post_todoist(f"{TODOIST_TASKS_URL}/{tid}/close", TODOIST_HEADERS)
-        else:
-            safe_post_todoist(f"{TODOIST_TASKS_URL}/{tid}/reopen", TODOIST_HEADERS)
+
+    if not tid:
+        # No Todoist ID → create new task
+        response = safe_post_todoist(TODOIST_TASKS_URL, TODOIST_HEADERS, data)
+        new_tid = response.get("id")
+        if new_tid:
+            # Update Notion page with Todoist ID
+            safe_patch(f"{NOTION_URL}/{notion_task['page_id']}", NOTION_HEADERS, {
+                "properties": {
+                    "Todoist ID": {"rich_text": [{"text": {"content": str(new_tid)}}]}
+                }
+            })
+            tid = new_tid
+
+    else:
+        # Update existing task
+        if data:
+            safe_post_todoist(f"{TODOIST_TASKS_URL}/{tid}", TODOIST_HEADERS, data)
+        if "Done" in props:
+            if props["Done"]["checkbox"]:
+                safe_post_todoist(f"{TODOIST_TASKS_URL}/{tid}/close", TODOIST_HEADERS)
+            else:
+                safe_post_todoist(f"{TODOIST_TASKS_URL}/{tid}/reopen", TODOIST_HEADERS)
 
 def update_notion_last_sync(page_id):
     data = {
