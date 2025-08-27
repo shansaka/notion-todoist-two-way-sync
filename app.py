@@ -134,7 +134,8 @@ def build_notion_properties(task, project_map, existing_props=None, include_sync
         "Todoist ID": {"rich_text": [{"text": {"content": str(task["id"])}}]},
         "Priority": {"select": {"name": f"P{task['priority']}"}} if task.get("priority") else None,
         "Due Date": due_date_obj,
-        "Project": {"select": {"name": project_name}}
+        "Project": {"select": {"name": project_name}},
+        "Description": {"rich_text": [{"text": {"content": task.get("description", "")}}]}  # added
     }
 
     if include_sync_time:
@@ -155,8 +156,11 @@ def normalize_datetime(dt_str):
         return dt_str
 
 def has_changes(existing_props, new_props):
-    existing_name = (existing_props.get("Name", {}).get("title") or [{}])[0].get("text", {}).get("content", "")
-    new_name = (new_props.get("Name", {}).get("title") or [{}])[0].get("text", {}).get("content", "")
+    def get_text(prop, key):
+        return (prop.get(key, {}).get("title") or [{}])[0].get("text", {}).get("content", "")
+
+    existing_name = get_text(existing_props, "Name")
+    new_name = get_text(new_props, "Name")
     if existing_name != new_name:
         print(f"🔄 Change detected: Name '{existing_name}' → '{new_name}'", flush=True)
         return True
@@ -186,6 +190,12 @@ def has_changes(existing_props, new_props):
     new_proj = new_props.get("Project", {}).get("select", {}).get("name")
     if (existing_proj or "") != (new_proj or ""):
         print(f"🔄 Change detected: Project '{existing_proj}' → '{new_proj}'", flush=True)
+        return True
+
+    existing_desc = (existing_props.get("Description", {}).get("rich_text") or [{}])[0].get("text", {}).get("content", "")
+    new_desc = (new_props.get("Description", {}).get("rich_text") or [{}])[0].get("text", {}).get("content", "")
+    if existing_desc != new_desc:
+        print(f"🔄 Change detected: Description changed", flush=True)
         return True
 
     return False
@@ -237,20 +247,16 @@ def update_todoist_task(notion_task):
             data["due_date"] = due
 
     if not tid:
-        # No Todoist ID → create new task
         response = safe_post_todoist(TODOIST_TASKS_URL, TODOIST_HEADERS, data)
         new_tid = response.get("id")
         if new_tid:
-            # Update Notion page with Todoist ID
             safe_patch(f"{NOTION_URL}/{notion_task['page_id']}", NOTION_HEADERS, {
                 "properties": {
                     "Todoist ID": {"rich_text": [{"text": {"content": str(new_tid)}}]}
                 }
             })
             tid = new_tid
-
     else:
-        # Update existing task
         if data:
             safe_post_todoist(f"{TODOIST_TASKS_URL}/{tid}", TODOIST_HEADERS, data)
         if "Done" in props:
@@ -334,5 +340,5 @@ if __name__ == "__main__":
             sync_two_way()
         except Exception as e:
             print(f"❌ Error in sync loop: {e}", flush=True)
-        print("", flush=True)  # empty line for separation
+        print("", flush=True)
         time.sleep(60)
