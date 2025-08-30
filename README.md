@@ -50,7 +50,28 @@ To run with Docker:
 
 ## Configuration
 
-Configure your Notion and Todoist API keys and other settings using environment variables. See the code for required variables.
+Configure your Notion and Todoist API keys and other settings using environment variables. Below are the required environment variables:
+
+### Required Environment Variables
+
+#### Notion
+
+- `NOTION_TOKEN`: Your Notion integration token
+- `NOTION_DATABASE_ID`: The ID of your Notion database
+
+#### Todoist
+
+- `TODOIST_API_KEY`: Your Todoist API key
+
+#### Email Notifications (optional, for error alerts)
+
+- `EMAIL_HOST`: SMTP server host
+- `EMAIL_PORT`: SMTP server port (default: 587)
+- `EMAIL_USER`: Email address to send from
+- `EMAIL_PASS`: Email password or app password
+- `EMAIL_TO`: Recipient email address (defaults to `EMAIL_USER` if not set)
+
+Set these variables in your environment or in a `.env` file for Docker usage.
 
 ## Files
 
